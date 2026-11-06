@@ -663,14 +663,68 @@ async function uploadWebdav(blob, name, cfg) {
   if (!cfg.url) throw new Error('Thiếu WebDAV URL');
   let base = String(cfg.url).trim();
   if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(base)) base = 'https://' + base;
-  const target = base.replace(/\/+$/, '') + '/' + encodeURIComponent(name);
+  base = base.replace(/\/+$/, '');
   const headers = {};
   if (cfg.username) {
     headers.Authorization =
       'Basic ' + btoa(unescape(encodeURIComponent(`${cfg.username}:${cfg.password || ''}`)));
   }
+  // Tự tạo folder đích nếu chưa có (MKCOL). 201 = vừa tạo, 405 = đã có — đều OK.
+  try {
+    const { pathname } = new URL(base);
+    if (pathname.replace(/\//g, '')) {
+      await fetch(base, { method: 'MKCOL', headers });
+    }
+  } catch (_) {}
+  const target = base + '/' + encodeURIComponent(name);
   const resp = await fetch(target, { method: 'PUT', headers, body: blob });
   if (!resp.ok) throw new Error('WebDAV HTTP ' + resp.status);
+}
+
+function webdavAuthHeaders(cfg) {
+  const headers = {};
+  if (cfg.username) {
+    headers.Authorization =
+      'Basic ' + btoa(unescape(encodeURIComponent(`${cfg.username}:${cfg.password || ''}`)));
+  }
+  return headers;
+}
+
+// Liệt kê folder con (PROPFIND Depth:1) để người dùng chọn nơi lưu trên PikPak/NAS.
+async function jobWebdavLs(job) {
+  let base = String(job.url || '').trim();
+  if (!base) throw new Error('Chưa nhập URL WebDAV');
+  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(base)) base = 'https://' + base;
+  base = base.replace(/\/+$/, '');
+  const resp = await fetch(base + '/', {
+    method: 'PROPFIND',
+    headers: Object.assign({ Depth: '1' }, webdavAuthHeaders(job))
+  });
+  if (!resp.ok) throw new Error('WebDAV HTTP ' + resp.status);
+  const xml = new DOMParser().parseFromString(await resp.text(), 'application/xml');
+  const basePath = new URL(base + '/').pathname.replace(/\/+$/, '');
+  const folders = [];
+  for (const node of xml.getElementsByTagNameNS('*', 'response')) {
+    const hrefEl = node.getElementsByTagNameNS('*', 'href')[0];
+    if (!hrefEl) continue;
+    let path;
+    try {
+      path = new URL(decodeURIComponent(hrefEl.textContent.trim()), base + '/').pathname.replace(/\/+$/, '');
+    } catch (_) {
+      continue;
+    }
+    if (path === basePath) continue;
+    if (node.getElementsByTagNameNS('*', 'collection').length === 0) continue;
+    const rel = path.startsWith(basePath) ? path.slice(basePath.length).replace(/^\//, '') : '';
+    if (!rel || rel.includes('/')) continue;
+    let name = rel;
+    try {
+      name = decodeURIComponent(rel);
+    } catch (_) {}
+    folders.push({ name, url: base + '/' + encodeURIComponent(name) });
+  }
+  folders.sort((a, b) => a.name.localeCompare(b.name));
+  return { ok: true, cwd: base + '/', folders };
 }
 
 async function uploadDrive(blob, name, cfg) {
@@ -900,6 +954,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         return jobStatus();
       case 'ping':
         return jobPing();
+      case 'webdav-ls':
+        return jobWebdavLs(job);
       case 'clear':
         return jobClear();
       case 'test-upload':

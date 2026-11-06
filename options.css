@@ -211,6 +211,32 @@ button:focus-visible {
   font-size: 12px;
 }
 
+.browser {
+  margin-top: 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px;
+  max-height: 220px;
+  overflow: auto;
+}
+
+.browser button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  padding: 7px 10px;
+  border-radius: 6px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.browser button:hover {
+  background: rgba(127, 127, 127, 0.15);
+}
+
 .logbox summary {
   cursor: pointer;
   color: var(--muted);

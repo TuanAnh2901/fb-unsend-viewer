@@ -18,7 +18,10 @@ const dom = {
   testUpload: document.getElementById('testUpload'),
   refreshStatus: document.getElementById('refreshStatus'),
   clearArchive: document.getElementById('clearArchive'),
-  grantWebdav: document.getElementById('grantWebdav')
+  grantWebdav: document.getElementById('grantWebdav'),
+  browseWebdav: document.getElementById('browseWebdav'),
+  webdavCwd: document.getElementById('webdavCwd'),
+  webdavBrowser: document.getElementById('webdavBrowser')
 };
 
 let settings = fbMergeArchiveSettings({});
@@ -259,7 +262,93 @@ dom.grantWebdav.addEventListener('click', async () => {
   }
 });
 
-/* ------------------------------------------------------------------ wiring */
+/* ------------------------------------------------------- webdav browser */
+
+function webdavCreds() {
+  const pick = (path) => {
+    const el = document.querySelector(`[data-path="${path}"]`);
+    return el ? el.value.trim() : '';
+  };
+  return {
+    url: pick('upload.webdav.url'),
+    username: pick('upload.webdav.username'),
+    password: document.querySelector('[data-path="upload.webdav.password"]')?.value || ''
+  };
+}
+
+function setWebdavUrl(url) {
+  const el = document.querySelector('[data-path="upload.webdav.url"]');
+  if (el) {
+    el.value = url;
+    scheduleSave();
+  }
+  renderWebdavBrowser({ cwd: url.replace(/\/+$/, '') + '/', folders: [] });
+  browseWebdav(url);
+}
+
+async function browseWebdav(url) {
+  const creds = webdavCreds();
+  if (url) creds.url = url;
+  if (!creds.url) {
+    dom.status.textContent = 'Nhập URL WebDAV trước.';
+    return;
+  }
+  dom.webdavCwd.textContent = 'Đang đọc…';
+  dom.webdavBrowser.hidden = false;
+  dom.webdavBrowser.innerHTML = '';
+  const resp = await send('ARCHIVE_JOB', { job: Object.assign({ type: 'webdav-ls' }, creds) });
+  if (!resp.ok) {
+    dom.webdavCwd.textContent = '';
+    dom.status.textContent = 'Không đọc được folder: ' + (resp.error || 'lỗi');
+    return;
+  }
+  renderWebdavBrowser(resp.result);
+}
+
+function renderWebdavBrowser(result) {
+  const cwd = result.cwd || '';
+  dom.webdavCwd.textContent = cwd;
+  const box = dom.webdavBrowser;
+  box.innerHTML = '';
+  const mk = (label, nextUrl) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = label;
+    btn.addEventListener('click', () => {
+      if (nextUrl) browseWebdav(nextUrl);
+      else setWebdavUrl(cwd);
+    });
+    box.appendChild(btn);
+  };
+  // Lên 1 cấp (trừ khi đang ở root của host).
+  try {
+    const u = new URL(cwd);
+    const parts = u.pathname.split('/').filter(Boolean);
+    if (parts.length) {
+      parts.pop();
+      mk('⬆ .. (lên 1 cấp)', u.origin + '/' + parts.map(encodeURIComponent).join('/') + (parts.length ? '/' : ''));
+    }
+  } catch (_) {}
+  for (const folder of result.folders || []) {
+    mk('📁 ' + folder.name, folder.url + '/');
+  }
+  // Chọn chính folder đang xem.
+  const choose = document.createElement('button');
+  choose.type = 'button';
+  choose.textContent = '✔ Lưu vào folder này';
+  choose.addEventListener('click', () => {
+    const el = document.querySelector('[data-path="upload.webdav.url"]');
+    if (el) {
+      el.value = cwd;
+      scheduleSave();
+    }
+    dom.webdavCwd.textContent = 'Đã chọn: ' + cwd;
+    box.hidden = true;
+  });
+  box.appendChild(choose);
+}
+
+dom.browseWebdav.addEventListener('click', () => browseWebdav(''));
 
 for (const el of inputs()) {
   el.addEventListener('input', scheduleSave);
