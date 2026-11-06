@@ -214,9 +214,14 @@ dom.testUpload.addEventListener('click', async () => {
   dom.testUpload.disabled = true;
   const resp = await send('ARCHIVE_TEST_UPLOAD');
   dom.testUpload.disabled = false;
-  dom.status.textContent = resp.ok
-    ? `Đã gửi file test tới ${resp.result?.sent || 0} đích.`
-    : 'Gửi test lỗi: ' + (resp.error || 'không rõ');
+  if (resp.ok) {
+    const detail = resp.result?.detail;
+    dom.status.textContent = Array.isArray(detail) && detail.length
+      ? `Đã gửi test tới ${resp.result.sent} đích:\n` + detail.join('\n')
+      : `Đã gửi file test tới ${resp.result?.sent || 0} đích.`;
+  } else {
+    dom.status.textContent = 'Gửi test lỗi: ' + (resp.error || 'không rõ');
+  }
   refreshLog();
 });
 

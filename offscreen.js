@@ -837,33 +837,48 @@ async function jobTestUpload() {
   const blob = new Blob(['fb-unsend archive test ' + new Date().toISOString()], { type: 'text/plain' });
   const name = 'fb-unsend-test.txt';
   const up = settings.upload;
+  const detail = [];
+  // Chạy từng đích riêng, đích nào lỗi ghi rõ đích đó (kèm origin để dễ đoán nguyên nhân).
+  const tryDest = async (label, origin, fn) => {
+    try {
+      await fn();
+      detail.push(`${label}: OK`);
+      return true;
+    } catch (err) {
+      detail.push(`${label} (${origin}): ${String(err?.message || err).slice(0, 160)}`);
+      return false;
+    }
+  };
   let sent = 0;
   if (up.telegram.botToken && up.telegram.chatId) {
-    const form = new FormData();
-    form.append('chat_id', up.telegram.chatId);
-    form.append('caption', 'FB Unsend archive test');
-    form.append('document', blob, name);
-    const resp = await fetch(`https://api.telegram.org/bot${up.telegram.botToken}/sendDocument`, {
-      method: 'POST',
-      body: form
-    });
-    if (!resp.ok) throw new Error('Telegram HTTP ' + resp.status);
-    sent++;
+    if (await tryDest('Telegram', 'api.telegram.org', async () => {
+      const form = new FormData();
+      form.append('chat_id', up.telegram.chatId);
+      form.append('caption', 'FB Unsend archive test');
+      form.append('document', blob, name);
+      const resp = await fetch(`https://api.telegram.org/bot${up.telegram.botToken}/sendDocument`, {
+        method: 'POST',
+        body: form
+      });
+      if (!resp.ok) throw new Error('Telegram HTTP ' + resp.status + ' ' + (await resp.text()).slice(0, 120));
+    })) sent++;
   }
   if (up.github.token && up.github.repo) {
-    await uploadGithub(blob, name, up.github);
-    sent++;
+    if (await tryDest('GitHub', 'api.github.com', async () => uploadGithub(blob, name, up.github))) sent++;
   }
   if (up.webdav.url) {
-    await uploadWebdav(blob, name, up.webdav);
-    sent++;
+    let origin = '';
+    try {
+      origin = new URL(up.webdav.url).origin;
+    } catch (_) {}
+    if (await tryDest('WebDAV', origin || up.webdav.url.slice(0, 60), async () => uploadWebdav(blob, name, up.webdav))) sent++;
   }
   if (up.gdrive.token) {
-    await uploadDrive(blob, name, up.gdrive);
-    sent++;
+    if (await tryDest('Drive', 'www.googleapis.com', async () => uploadDrive(blob, name, up.gdrive))) sent++;
   }
-  if (!sent) throw new Error('Chưa cấu hình đích nào');
-  return { ok: true, sent };
+  if (!detail.length) throw new Error('Chưa cấu hình đích nào');
+  if (!sent) throw new Error(detail.join(' | '));
+  return { ok: true, sent, detail };
 }
 
 /* --------------------------------------------------------------- dispatch */

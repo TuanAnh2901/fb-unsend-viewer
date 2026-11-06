@@ -232,16 +232,19 @@ async function runArchiveJob(job) {
   // Offscreen vừa tạo có thể chưa kịp đăng ký listener → thử lại vài nhịp.
   let lastError = null;
   for (let attempt = 0; attempt < 6; attempt++) {
+    let resp;
     try {
-      const resp = await chrome.runtime.sendMessage({ type: 'ARCHIVE_JOB', job });
-      if (!resp) throw new Error('Offscreen không phản hồi');
-      if (resp.ok === false) throw new Error(resp.error || 'Job thất bại');
-      return resp.result;
+      resp = await chrome.runtime.sendMessage({ type: 'ARCHIVE_JOB', job });
     } catch (err) {
+      // Chưa có receiver (offscreen chưa kịp đăng ký) → chờ rồi thử lại.
       lastError = err;
-      if (String(err?.message || err).startsWith('Offscreen')) throw err;
       await new Promise((resolve) => setTimeout(resolve, 200));
+      continue;
     }
+    // Có phản hồi (kể cả báo lỗi job) → không retry, ném luôn để log 1 dòng.
+    if (!resp) throw new Error('Offscreen không phản hồi');
+    if (resp.ok === false) throw new Error(resp.error || 'Job thất bại');
+    return resp.result;
   }
   throw lastError || new Error('Không gửi được job archive');
 }
