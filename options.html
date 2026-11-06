@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>FB Unsend Viewer — Cài đặt</title>
+    <link rel="stylesheet" href="options.css" />
+  </head>
+  <body>
+    <main class="wrap">
+      <header class="head">
+        <div>
+          <h1>Cài đặt archive</h1>
+          <p class="sub">
+            Tin bị gỡ vẫn nằm trong <code>chrome.storage.local</code> như trước. Phần dưới điều khiển
+            việc tải bytes media, đóng gói ZIP và backup ra ngoài.
+          </p>
+        </div>
+        <span id="saveState" class="pill">Đã lưu</span>
+      </header>
+
+      <section class="card">
+        <h2>Media &amp; ảnh</h2>
+        <label class="row check">
+          <input type="checkbox" data-path="media.cacheRemoteBytes" />
+          <span>
+            Tải bytes gốc của ảnh/video/audio ngay khi bắt được tin
+            <small>URL CDN của Facebook hết hạn sau vài giờ–vài ngày. Bật để giữ file thật.</small>
+          </span>
+        </label>
+        <div class="grid">
+          <label class="field">
+            <span>Chiều dài cạnh tối đa khi cache ảnh (px)</span>
+            <input type="number" min="256" max="4096" step="64" data-path="media.imageMaxDim" />
+          </label>
+          <label class="field">
+            <span>Chất lượng ảnh cache (0.1 – 1)</span>
+            <input type="number" min="0.1" max="1" step="0.01" data-path="media.imageQuality" />
+          </label>
+          <label class="field">
+            <span>Giới hạn mỗi file media (MB)</span>
+            <input type="number" min="1" max="2048" step="1" data-path="media.maxFileMB" />
+          </label>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Lưu trữ trong máy</h2>
+        <div class="grid">
+          <label class="field">
+            <span>Xoá tin đã export sau (ngày, 0 = không xoá)</span>
+            <input type="number" min="0" max="3650" step="1" data-path="retention.maxAgeDays" />
+          </label>
+          <label class="field">
+            <span>Trần dung lượng media (MB)</span>
+            <input type="number" min="50" max="51200" step="50" data-path="retention.maxTotalMB" />
+          </label>
+        </div>
+        <p class="hint">Media chưa export không bao giờ bị xoá tự động.</p>
+      </section>
+
+      <section class="card">
+        <h2>Đóng gói ZIP</h2>
+        <label class="row check">
+          <input type="checkbox" data-path="export.auto" />
+          <span>Tự xuất theo lô khi có tin mới</span>
+        </label>
+        <div class="grid">
+          <label class="field">
+            <span>Gom đủ N tin thì xuất</span>
+            <input type="number" min="1" max="500" step="1" data-path="export.batchSize" />
+          </label>
+          <label class="field">
+            <span>Hoặc rảnh M phút thì xuất</span>
+            <input type="number" min="1" max="1440" step="1" data-path="export.idleMinutes" />
+          </label>
+          <label class="field">
+            <span>Cắt phần khi vượt (MB)</span>
+            <input type="number" min="5" max="1900" step="5" data-path="export.splitMB" />
+          </label>
+          <label class="field">
+            <span>Nén</span>
+            <select data-path="export.compression">
+              <option value="deflate">Deflate (nhỏ hơn)</option>
+              <option value="store">Không nén (nhanh hơn)</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Nơi ghi file</span>
+            <select data-path="export.downloadMode">
+              <option value="downloads">Thư mục Downloads</option>
+              <option value="folder">Folder tự chọn</option>
+              <option value="none">Không ghi, chỉ upload</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Thư mục con <small>chỉ có tác dụng với chế độ folder qua SW; tải trực tiếp luôn vào Downloads gốc</small></span>
+            <input type="text" data-path="export.downloadSubdir" />
+          </label>        </div>
+        <fieldset class="formats">
+          <legend>Định dạng tin nhắn trong ZIP</legend>
+          <label><input type="checkbox" data-format="json" /> JSON (đầy đủ field)</label>
+          <label><input type="checkbox" data-format="txt" /> TXT (dễ đọc)</label>
+        </fieldset>
+        <div class="actions">
+          <button id="pickFolder" class="btn">Chọn folder lưu…</button>
+          <button id="exportAll" class="btn">Xuất toàn bộ ngay</button>
+          <span id="folderState" class="hint"></span>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Upload tự động</h2>
+        <label class="row check">
+          <input type="checkbox" data-path="upload.enabled" />
+          <span>Bật upload sau khi đóng gói <small>Chỉ đích đã điền đủ mới chạy.</small></span>
+        </label>
+
+        <h3>Telegram bot</h3>
+        <div class="grid">
+          <label class="field wide">
+            <span>Bot token</span>
+            <input type="password" data-path="upload.telegram.botToken" autocomplete="off" />
+          </label>
+          <label class="field">
+            <span>Chat ID</span>
+            <input type="text" data-path="upload.telegram.chatId" />
+          </label>
+        </div>
+
+        <h3>GitHub repo</h3>
+        <div class="grid">
+          <label class="field wide">
+            <span>Fine-grained token (contents: write)</span>
+            <input type="password" data-path="upload.github.token" autocomplete="off" />
+          </label>
+          <label class="field">
+            <span>Repo (user/repo)</span>
+            <input type="text" data-path="upload.github.repo" />
+          </label>
+          <label class="field">
+            <span>Branch</span>
+            <input type="text" data-path="upload.github.branch" />
+          </label>
+          <label class="field">
+            <span>Đường dẫn trong repo</span>
+            <input type="text" data-path="upload.github.basePath" />
+          </label>
+        </div>
+
+        <h3>WebDAV (Nextcloud, rclone, NAS…)</h3>
+        <div class="grid">
+          <label class="field wide">
+            <span>URL thư mục</span>
+            <input type="text" data-path="upload.webdav.url" placeholder="https://cloud.example.com/remote.php/dav/files/me/archive/" />
+          </label>
+          <label class="field">
+            <span>Tài khoản</span>
+            <input type="text" data-path="upload.webdav.username" autocomplete="off" />
+          </label>
+          <label class="field">
+            <span>Mật khẩu / app password</span>
+            <input type="password" data-path="upload.webdav.password" autocomplete="off" />
+          </label>
+          <div class="field">
+            <span>Quyền truy cập host</span>
+            <button id="grantWebdav" class="btn small">Cấp quyền</button>
+          </div>
+        </div>
+
+        <h3>Google Drive (beta)</h3>
+        <div class="grid">
+          <label class="field wide">
+            <span>OAuth access token (hết hạn ~1 giờ)</span>
+            <input type="password" data-path="upload.gdrive.token" autocomplete="off" />
+          </label>
+          <label class="field">
+            <span>Folder ID (tuỳ chọn)</span>
+            <input type="text" data-path="upload.gdrive.folderId" />
+          </label>
+        </div>
+        <p class="hint">
+          Drive cần access token tự lấy từ Google OAuth Playground (scope
+          <code>drive.file</code>). Token hết hạn thì dán token mới.
+        </p>
+
+        <div class="actions">
+          <button id="testUpload" class="btn">Gửi file test</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Trạng thái</h2>
+        <div id="status" class="status">Đang đọc…</div>
+        <div class="actions">
+          <button id="refreshStatus" class="btn small">Làm mới</button>
+          <button id="clearArchive" class="btn small danger">Xoá media đã lưu</button>
+        </div>
+        <details class="logbox">
+          <summary>Nhật ký gần đây</summary>
+          <pre id="log"></pre>
+        </details>
+      </section>
+    </main>
+    <script src="archive-defaults.js"></script>
+    <script src="options.js"></script>
+  </body>
+</html>

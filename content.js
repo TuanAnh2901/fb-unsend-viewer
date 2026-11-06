@@ -13,6 +13,13 @@
   const STORAGE_KEY_ORPHANED_BRIDGE = 'fb_unsend_orphaned_bridge_v1';
   const MAX_STORED_MESSAGES = 500;
 
+  // Ảnh khôi phục giữ nguyên độ phân giải gốc của ảnh trong khung chat (trước đây cap 360px
+  // nên ảnh lưu lại bị mờ/nhỏ). Chỉ chặn ảnh cực lớn và ảnh nặng để storage không phình.
+  // Có thể chỉnh trong Options (media.imageMaxDim / imageQuality).
+  let cachedImageMaxDim = 2048;
+  let cachedImageQuality = 0.92;
+  const MAX_CACHED_IMAGE_BYTES = 1200000; // ~900KB nhị phân sau base64
+
   // Tùy chọn hiện thông báo ở góc màn hình (bật/tắt từ popup), mặc định bật
   let isToastEnabled = true;
 
@@ -252,13 +259,68 @@
     return typeof url === 'string' && /[?&]efg=eyJ2ZW5jb2RlX3RhZyI6ImRhc2hf/i.test(url);
   }
 
+  // Chữ ký ảnh (aspect + hash 8x8) để một tin nhắn không hiện 2 lần cùng một ảnh khi
+  // ảnh được chụp lại ở 2 độ phân giải/URL khác nhau.
+  const imageSignatureByUrl = new Map();
+
+  function imageSignatureFrom(source, w, h) {
+    try {
+      const small = document.createElement('canvas');
+      small.width = 8;
+      small.height = 8;
+      const sctx = small.getContext('2d');
+      sctx.drawImage(source, 0, 0, 8, 8);
+      const data = sctx.getImageData(0, 0, 8, 8).data;
+      let bits = '';
+      for (let i = 0; i < data.length; i += 4) {
+        bits += data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114 >= 128 ? '1' : '0';
+      }
+      return h ? `${(w / h).toFixed(2)}|${bits}` : '';
+    } catch (_) {
+      return '';
+    }
+  }
+
+  function computeImageSignature(canvas) {
+    return imageSignatureFrom(canvas, canvas.width, canvas.height);
+  }
+
+  function renderImageSignature(imgEl) {
+    if (imgEl.dataset.fbUnsendSignature) return imgEl.dataset.fbUnsendSignature;
+    if (!imgEl.complete || !imgEl.naturalWidth) return '';
+    const signature = imageSignatureFrom(imgEl, imgEl.naturalWidth, imgEl.naturalHeight);
+    if (signature) imgEl.dataset.fbUnsendSignature = signature;
+    return signature;
+  }
+
+  function isSimilarImageSignature(a, b) {
+    if (!a || !b) return false;
+    const [aspectA, bitsA] = a.split('|');
+    const [aspectB, bitsB] = b.split('|');
+    if (!bitsA || !bitsB || bitsA.length !== bitsB.length) return false;
+    if (Math.abs(parseFloat(aspectA) - parseFloat(aspectB)) > 0.02) return false;
+    let diff = 0;
+    for (let i = 0; i < bitsA.length; i++) {
+      if (bitsA[i] !== bitsB[i] && ++diff > 6) return false;
+    }
+    return true;
+  }
+
   function sanitizeAttachmentsList(attachments) {
     if (!Array.isArray(attachments)) return [];
     const valid = [];
+    const keptImageSignatures = [];
     for (const rawUrl of attachments) {
       if (!rawUrl || typeof rawUrl !== 'string') continue;
       const url = isDashMpdXmlString(rawUrl) ? extractDashMpdVideoUrl(rawUrl) : rawUrl;
       if (!url || typeof url !== 'string' || isDashMpdXmlString(url)) continue;
+      if (url.startsWith('data:image/')) {
+        const signature = imageSignatureByUrl.get(url);
+        if (signature && keptImageSignatures.some((s) => isSimilarImageSignature(s, signature))) {
+          continue;
+        }
+        if (signature) keptImageSignatures.push(signature);
+      }
       if (
         url.includes('/messaging/lightspeed/media_fallback/') ||
         /\/t39\.30808-1\/|p50x50|p100x100|s100x100|p60x60|p40x40|dst-jpg_s\d+x\d+/i.test(url)
@@ -1632,6 +1694,76 @@
     } catch (_) {}
   }
 
+  // Gửi record cho background để tải bytes media gốc (video/audio/ảnh CDN) về archive.
+  // Ảnh base64 đã nằm sẵn trong record nên không cần gửi lại (chuỗi rất dài).
+  function notifyArchiveCandidate(record) {
+    if (!record || !isExtensionContextValid() || !chrome?.runtime?.sendMessage) return;
+    try {
+      const attachments = (record.attachments || []).filter(
+        (url) => typeof url === 'string' && !url.startsWith('data:') && url.length < 2048
+      );
+      if (!attachments.length) return;
+      chrome.runtime.sendMessage({
+        type: 'ARCHIVE_RECORD',
+        record: {
+          messageId: record.messageId,
+          personName: record.personName,
+          threadName: record.threadName,
+          text: (record.text || '').slice(0, 4000),
+          timestamp: record.timestamp,
+          unsentAt: record.unsentAt,
+          attachments
+        }
+      });
+    } catch (_) {}
+  }
+
+  // Dọn record đã export và quá hạn. Chạy ở đây (không phải background) vì
+  // danh sách record sống trong content script; background xoá sẽ bị ghi đè lại.
+  const ARCHIVE_SETTINGS_KEY = 'fb_archive_settings_v1';
+  let archiveRetentionRunning = false;
+
+  function applyArchiveRetention(settings) {
+    if (archiveRetentionRunning || !settings?.retention) return;
+    const days = Number(settings.retention.maxAgeDays) || 0;
+    if (days <= 0) return;
+    const cutoff = Date.now() - days * 86400000;
+    const before = unsentMessagesList.length;
+    unsentMessagesList = unsentMessagesList.filter((record) => {
+      if (!record || !record.exportedAt) return true;
+      const ts = record.unsentAt || record.timestamp || 0;
+      return ts >= cutoff;
+    });
+    if (unsentMessagesList.length !== before) {
+      archiveRetentionRunning = true;
+      dlog('ARCHIVE-RETENTION', '#fdcb6e', `Xoá ${before - unsentMessagesList.length} tin đã export quá ${days} ngày`);
+      saveToStorage();
+      setTimeout(() => {
+        archiveRetentionRunning = false;
+      }, 1000);
+    }
+  }
+
+  function loadArchiveSettings() {
+    if (!isExtensionContextValid() || !chrome?.storage?.local) return;
+    try {
+      chrome.storage.local.get(ARCHIVE_SETTINGS_KEY, (res) => {
+        if (!isExtensionContextValid() || chrome.runtime?.lastError) return;
+        const settings = res?.[ARCHIVE_SETTINGS_KEY];
+        if (!settings) return;
+        if (settings.media) {
+          if (Number(settings.media.imageMaxDim) >= 256) {
+            cachedImageMaxDim = Math.min(4096, Number(settings.media.imageMaxDim));
+          }
+          if (Number(settings.media.imageQuality) > 0.1) {
+            cachedImageQuality = Math.min(1, Number(settings.media.imageQuality));
+          }
+        }
+        applyArchiveRetention(settings);
+      });
+    } catch (_) {}
+  }
+
   function upsertUnsentRecord(newRecord) {
     const cleanText = normalizeUnsupportedAttachmentText(newRecord.text || '');
     const cleanAttachments = sanitizeAttachmentsList(newRecord.attachments);
@@ -1773,6 +1905,7 @@
       dlog('UNSENT-MERGED', '#00cec9', 'Cập nhật bản ghi gỡ đã có trong History:', merged);
       updateActiveToastIfPresent(merged);
       saveToStorage();
+      notifyArchiveCandidate(merged);
       return { record: merged, isNew: false };
     }
 
@@ -1814,6 +1947,7 @@
     saveToStorage();
     showUnsentToast(finalRecord);
     notifyUnreadBadge();
+    notifyArchiveCandidate(finalRecord);
     return { record: finalRecord, isNew: true };
   }
 
@@ -2333,7 +2467,7 @@
 
     if (imgEl.complete && imgEl.naturalWidth > 64 && imgEl.naturalHeight > 64) {
       try {
-        const maxDim = 360;
+        const maxDim = cachedImageMaxDim;
         let w = imgEl.naturalWidth;
         let h = imgEl.naturalHeight;
         if (w > maxDim || h > maxDim) {
@@ -2350,9 +2484,19 @@
         canvas.height = h;
         const ctx = canvas.getContext('2d');
         ctx.drawImage(imgEl, 0, 0, w, h);
-        const dataUrl = canvas.toDataURL('image/webp', 0.82);
+        let dataUrl = canvas.toDataURL('image/webp', cachedImageQuality);
+        if (dataUrl.length > MAX_CACHED_IMAGE_BYTES) {
+          const smaller = canvas.toDataURL('image/webp', 0.8);
+          if (smaller.length < dataUrl.length) dataUrl = smaller;
+        }
         if (dataUrl && dataUrl.startsWith('data:image/')) {
           cachedImageMap.set(rawSrc, dataUrl);
+          const signature = computeImageSignature(canvas);
+          if (signature) imageSignatureByUrl.set(dataUrl, signature);
+          dlog('IMAGE-CACHED', '#00cec9', `Lưu ảnh ${w}x${h} (${Math.round(dataUrl.length / 1024)}KB)`, {
+            sourceSize: `${imgEl.naturalWidth}x${imgEl.naturalHeight}`,
+            storedSize: `${w}x${h}`
+          });
           return dataUrl;
         }
       } catch (_) {}
@@ -4141,6 +4285,24 @@
     img.addEventListener('error', () => {
       img.remove();
     });
+    // Chống ảnh trùng: cùng một ảnh có thể vào record 2 lần (bắt từ mạng + quét DOM)
+    // ở 2 độ phân giải khác nhau nên chuỗi data URL khác nhau. So chữ ký ảnh khi đã load.
+    img.addEventListener('load', () => {
+      if (isToast) return;
+      const container = img.parentElement;
+      if (!container || !container.classList.contains('fb-unsend-media-list')) return;
+      const signature = renderImageSignature(img);
+      if (!signature) return;
+      const siblingImgs = Array.from(container.querySelectorAll('.fb-unsend-restored-img'));
+      for (const other of siblingImgs) {
+        if (other === img || !other.complete || !other.naturalWidth) continue;
+        if (isSimilarImageSignature(signature, renderImageSignature(other))) {
+          img.remove();
+          dlog('IMAGE-DEDUPE', '#fdcb6e', 'Bỏ 1 ảnh trùng trong cùng bong bóng khôi phục');
+          return;
+        }
+      }
+    });
     return img;
   }
 
@@ -4576,4 +4738,8 @@
 
   loadFromStorage();
   startDomObserver();
+  if (isExtensionContextValid()) {
+    loadArchiveSettings();
+    setInterval(loadArchiveSettings, 3600000);
+  }
 })();

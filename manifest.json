@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "FB Unsend Message Viewer",
-  "version": "1.2.4",
+  "version": "1.3.0",
   "author": "binhake",
   "homepage_url": "https://github.com/binhake/fb-unsend-viewer",
   "description": "Ghi nhận ngầm và khôi phục tin nhắn bị gỡ trên Facebook ngay cả khi chuyển sang tab khác.",
@@ -13,13 +13,29 @@
   },
   "permissions": [
     "storage",
-    "unlimitedStorage"
+    "unlimitedStorage",
+    "downloads",
+    "alarms",
+    "offscreen"
   ],
   "host_permissions": [
-    "*://*.facebook.com/*"
+    "*://*.facebook.com/*",
+    "*://*.fbcdn.net/*",
+    "*://*.cdn.fbsbx.com/*",
+    "*://*.mmg.whatsapp.net/*",
+    "https://api.telegram.org/*",
+    "https://api.github.com/*",
+    "https://www.googleapis.com/*"
+  ],
+  "optional_host_permissions": [
+    "*://*/*"
   ],
   "background": {
     "service_worker": "background.js"
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
   },
   "action": {
     "default_popup": "popup.html",

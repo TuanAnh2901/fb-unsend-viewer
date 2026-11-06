@@ -45,6 +45,7 @@ function cacheDom() {
   dom.tabCounts = dom.filterTabs.querySelectorAll('.tab-count');
 
   dom.exportBtn = document.getElementById('export-btn');
+  dom.settingsBtn = document.getElementById('settings-btn');
   dom.importBtn = document.getElementById('import-btn');
   dom.importFileInput = document.getElementById('import-file-input');
   dom.clearAllBtn = document.getElementById('clear-all-btn');
@@ -1383,6 +1384,11 @@ function bindEvents() {
   });
 
   dom.exportBtn.addEventListener('click', exportBackupJson);
+  if (dom.settingsBtn) {
+    dom.settingsBtn.addEventListener('click', function () {
+      chrome.runtime.openOptionsPage();
+    });
+  }
   if (dom.debugBtn) {
     dom.debugBtn.addEventListener('click', exportDebugReport);
   }
