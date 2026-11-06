@@ -239,10 +239,16 @@ dom.refreshStatus.addEventListener('click', () => {
 
 dom.grantWebdav.addEventListener('click', async () => {
   const urlInput = document.querySelector('[data-path="upload.webdav.url"]');
-  const raw = (urlInput?.value || '').trim();
+  let raw = (urlInput?.value || '').trim();
   if (!raw) {
     dom.status.textContent = 'Nhập URL WebDAV trước.';
     return;
+  }
+  // Tự thêm https:// khi người dùng chỉ dán hostname (vd dav.pikpak.ai).
+  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(raw)) {
+    raw = 'https://' + raw;
+    urlInput.value = raw;
+    scheduleSave();
   }
   try {
     const origin = new URL(raw).origin + '/*';

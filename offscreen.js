@@ -661,7 +661,9 @@ async function uploadGithub(blob, name, cfg) {
 
 async function uploadWebdav(blob, name, cfg) {
   if (!cfg.url) throw new Error('Thiếu WebDAV URL');
-  const target = String(cfg.url).replace(/\/+$/, '') + '/' + encodeURIComponent(name);
+  let base = String(cfg.url).trim();
+  if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(base)) base = 'https://' + base;
+  const target = base.replace(/\/+$/, '') + '/' + encodeURIComponent(name);
   const headers = {};
   if (cfg.username) {
     headers.Authorization =
