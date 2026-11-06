@@ -514,12 +514,43 @@ function buildEmptyState(isFiltering) {
   return empty;
 }
 
+// URL trông giống video nhưng thiếu marker rõ ràng (vd link lookaside/fbsbx,
+// scontent không đuôi file): <img> tải lỗi thì thử vẽ <video> thay vì giấu luôn.
+function looksLikeVideoUrl(url) {
+  const clean = String(url || '');
+  return /(videoclip|video_clip|\/t42\.|https?:\/\/video[a-z0-9.-]*\.fbcdn\.net|fbsbx\.com|lookaside|mime=video|(\.mp4|\.mov|\.webm|\.m4v|\.ogv)(\?|#|$))/i.test(
+    clean
+  );
+}
+
+function buildVideoEl(url, onExpired) {
+  const video = document.createElement('video');
+  video.controls = true;
+  video.preload = 'metadata';
+  video.playsInline = true;
+  video.src = url;
+  video.className = 'media-video';
+  video.addEventListener('error', function () {
+    const fallback = document.createElement('div');
+    fallback.className = 'media-expired-notice';
+    fallback.textContent = '🎬 Video không còn khả dụng (liên kết trên máy chủ Facebook đã hết hạn)';
+    video.replaceWith(fallback);
+    if (typeof onExpired === 'function') onExpired(url);
+  });
+  return video;
+}
+
 function buildMediaThumb(url) {
   const thumb = cloneTemplate('mediaThumbTemplate');
   const img = thumb.querySelector('img');
   img.src = url;
   img.addEventListener('error', function () {
-    thumb.remove();
+    // Ảnh hỏng mà URL giống video (sai phân loại) → thử <video>, đừng giấu luôn.
+    if (looksLikeVideoUrl(url)) {
+      thumb.replaceWith(buildVideoEl(url));
+    } else {
+      thumb.remove();
+    }
   });
   thumb.addEventListener('click', function () {
     openLightbox(url);
@@ -545,20 +576,7 @@ function buildMediaItem(url, onExpired) {
     return audio;
   }
   if (mediaType === 'video') {
-    const video = document.createElement('video');
-    video.controls = true;
-    video.preload = 'metadata';
-    video.playsInline = true;
-    video.src = url;
-    video.className = 'media-video';
-    video.addEventListener('error', function () {
-      const fallback = document.createElement('div');
-      fallback.className = 'media-expired-notice';
-      fallback.textContent = '🎬 Video không còn khả dụng (liên kết trên máy chủ Facebook đã hết hạn)';
-      video.replaceWith(fallback);
-      if (typeof onExpired === 'function') onExpired(url);
-    });
-    return video;
+    return buildVideoEl(url, onExpired);
   }
   return buildMediaThumb(url);
 }
