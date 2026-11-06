@@ -1389,6 +1389,61 @@ function bindEvents() {
       chrome.runtime.openOptionsPage();
     });
   }
+
+  // Nút tắt archive: ZIP về máy / up WebDAV.
+  const quickZipBtn = document.getElementById('quick-zip-btn');
+  const quickWebdavBtn = document.getElementById('quick-webdav-btn');
+  const archiveStatus = document.getElementById('archive-status');
+
+  function sendArchive(type, payload) {
+    return new Promise((resolve) => {
+      try {
+        chrome.runtime.sendMessage(Object.assign({ type }, payload || {}), (resp) => {
+          resolve(resp || { ok: false, error: chrome.runtime.lastError?.message || 'Không có phản hồi' });
+        });
+      } catch (err) {
+        resolve({ ok: false, error: String(err?.message || err) });
+      }
+    });
+  }
+
+  function setArchiveStatus(text) {
+    if (archiveStatus) archiveStatus.textContent = text;
+  }
+
+  async function runQuickArchive(label, needsWebdav) {
+    if (!quickZipBtn || !quickWebdavBtn) return;
+    if (needsWebdav) {
+      try {
+        const res = await chrome.storage.local.get('fb_archive_settings_v1');
+        const up = res?.fb_archive_settings_v1?.upload || {};
+        if (!up.enabled || !up.webdav?.url) {
+          setArchiveStatus('Chưa cấu hình WebDAV — mở Cài đặt.');
+          chrome.runtime.openOptionsPage();
+          return;
+        }
+      } catch (_) {}
+    }
+    quickZipBtn.disabled = true;
+    quickWebdavBtn.disabled = true;
+    setArchiveStatus(label + '…');
+    const resp = await sendArchive('ARCHIVE_RUN_EXPORT', { mode: 'full' });
+    quickZipBtn.disabled = false;
+    quickWebdavBtn.disabled = false;
+    if (resp.ok) {
+      const r = resp.result || {};
+      setArchiveStatus(`Xong: ${r.exported || 0} tin, ${r.parts || 0} phần.`);
+    } else {
+      setArchiveStatus('Lỗi: ' + (resp.error || 'không rõ'));
+    }
+  }
+
+  if (quickZipBtn) {
+    quickZipBtn.addEventListener('click', () => runQuickArchive('Đang đóng gói ZIP', false));
+  }
+  if (quickWebdavBtn) {
+    quickWebdavBtn.addEventListener('click', () => runQuickArchive('Đang xuất + up WebDAV', true));
+  }
   if (dom.debugBtn) {
     dom.debugBtn.addEventListener('click', exportDebugReport);
   }

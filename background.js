@@ -344,6 +344,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       }
     })();
     sendResponse({ ok: true });
+    // Có tin/gỡ mới → kiểm tra ngưỡng xuất ngay, khỏi chờ alarm 1 phút.
+    archiveTick();
     return true;
   }
 

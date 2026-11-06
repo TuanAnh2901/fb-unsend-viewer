@@ -565,9 +565,13 @@ async function planParts(records, settings) {
 
 /* ---------------------------------------------------------------- delivery */
 
-function zipName(batchId, index, total) {
+function zipName(batchId, index, total, exportedAt) {
+  // Tên file đọc được thời gian để tracking: fb-unsend-20261106-170839.zip
+  const d = new Date(exportedAt || Date.now());
+  const p = (n) => String(n).padStart(2, '0');
+  const stamp = `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
   const suffix = total > 1 ? `-part${index}of${total}` : '';
-  return `fb-unsend-${batchId}${suffix}.zip`;
+  return `fb-unsend-${stamp}${suffix}.zip`;
 }
 
 async function writeToFolder(blob, name) {
@@ -810,7 +814,7 @@ async function jobExport(job) {
       { batchId, exportedAt, part: i + 1, parts: parts.length, mode },
       settings
     );
-    const name = zipName(batchId, i + 1, parts.length);
+    const name = zipName(batchId, i + 1, parts.length, exportedAt);
     await deliver(built.blob, name, settings);
     await markMediaExported(built.mediaHashes);
     mediaTotal += built.mediaHashes.length;

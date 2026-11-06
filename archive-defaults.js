@@ -19,7 +19,7 @@
       maxTotalMB: 2048
     },
     export: {
-      auto: false,
+      auto: true,
       batchSize: 5,
       idleMinutes: 10,
       formats: ['json', 'txt'],
