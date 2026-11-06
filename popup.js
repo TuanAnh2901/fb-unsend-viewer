@@ -1432,7 +1432,11 @@ function bindEvents() {
     quickWebdavBtn.disabled = false;
     if (resp.ok) {
       const r = resp.result || {};
-      setArchiveStatus(`Xong: ${r.exported || 0} tin, ${r.parts || 0} phần.`);
+      setArchiveStatus(
+        resp.isEmpty || !r.exported
+          ? 'Không có tin mới cần xuất.'
+          : `Xong: ${r.exported || 0} tin, ${r.parts || 0} phần.`
+      );
     } else {
       setArchiveStatus('Lỗi: ' + (resp.error || 'không rõ'));
     }

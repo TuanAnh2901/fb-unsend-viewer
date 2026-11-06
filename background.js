@@ -260,6 +260,10 @@ async function runExport(mode) {
   exportRunning = true;
   try {
     const result = await runArchiveJob({ type: 'export', mode: mode || 'incremental' });
+    // Không có tin mới (exported === 0) → không ZIP, không upload, chỉ báo cho UI biết.
+    if (!result.exported) {
+      return { ok: true, result, isEmpty: true };
+    }
     await archiveLog(
       `Export xong: ${result.exported} tin, ${result.parts} phần` +
         (result.media ? `, ${result.media} media` : '')
@@ -345,6 +349,7 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     })();
     sendResponse({ ok: true });
     // Có tin/gỡ mới → kiểm tra ngưỡng xuất ngay, khỏi chờ alarm 1 phút.
+    // archiveTick tự bỏ qua khi không có tin chưa export nên không spam ZIP.
     archiveTick();
     return true;
   }
