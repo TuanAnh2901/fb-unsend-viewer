@@ -30,7 +30,7 @@
     },
     upload: {
       enabled: false,
-      telegram: { botToken: '', chatId: '' },
+      telegram: { botToken: '', chatId: '', instant: true },
       github: { token: '', repo: '', branch: 'main', basePath: 'fb-unsend-archive/' },
       webdav: { url: '', username: '', password: '' },
       gdrive: { token: '', folderId: '' }

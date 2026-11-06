@@ -1696,19 +1696,22 @@
 
   // Gửi record cho background để tải bytes media gốc (video/audio/ảnh CDN) về archive.
   // Ảnh base64 đã nằm sẵn trong record nên không cần gửi lại (chuỗi rất dài).
-  function notifyArchiveCandidate(record) {
-    if (!record || !isExtensionContextValid() || !chrome?.runtime?.sendMessage) return;
+  // Báo cho background khi có tin gỡ MỚI (isNew) để tải bytes media + push Telegram tức thì.
+  // Tin text-only cũng báo (attachments rỗng) vì Telegram instant cần text.
+  function notifyArchiveCandidate(record, isNew) {
+    if (!record || !isNew || !isExtensionContextValid() || !chrome?.runtime?.sendMessage) return;
     try {
-      const attachments = (record.attachments || []).filter(
-        (url) => typeof url === 'string' && !url.startsWith('data:') && url.length < 2048
-      );
-      if (!attachments.length) return;
+      const attachments = (record.attachments || [])
+        .filter((url) => typeof url === 'string' && url.length < 12000)
+        .slice(0, 8);
       chrome.runtime.sendMessage({
         type: 'ARCHIVE_RECORD',
         record: {
           messageId: record.messageId,
+          isSelf: Boolean(record.isSelf),
           personName: record.personName,
           threadName: record.threadName,
+          senderName: record.senderName,
           text: (record.text || '').slice(0, 4000),
           timestamp: record.timestamp,
           unsentAt: record.unsentAt,
@@ -1905,7 +1908,7 @@
       dlog('UNSENT-MERGED', '#00cec9', 'Cập nhật bản ghi gỡ đã có trong History:', merged);
       updateActiveToastIfPresent(merged);
       saveToStorage();
-      notifyArchiveCandidate(merged);
+      notifyArchiveCandidate(merged, false);
       return { record: merged, isNew: false };
     }
 
@@ -1947,7 +1950,7 @@
     saveToStorage();
     showUnsentToast(finalRecord);
     notifyUnreadBadge();
-    notifyArchiveCandidate(finalRecord);
+    notifyArchiveCandidate(finalRecord, true);
     return { record: finalRecord, isNew: true };
   }
 

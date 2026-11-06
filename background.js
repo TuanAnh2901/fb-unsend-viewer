@@ -249,6 +249,107 @@ async function runArchiveJob(job) {
   throw lastError || new Error('Không gửi được job archive');
 }
 
+/* ------------------------------------------------------- telegram instant */
+
+// Gửi thẳng từng tin gỡ vào bot Telegram: 1 tin nhắn chữ + từng media.
+// URL remote để Telegram tự tải (không qua tay mình); data URL thì upload blob.
+function escapeTelegramHtml(text) {
+  return String(text || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+function instantMediaKind(url, mime) {
+  const m = String(mime || '').toLowerCase();
+  if (m.startsWith('image/')) return 'photo';
+  if (m.startsWith('video/')) return 'video';
+  if (m.startsWith('audio/')) return 'audio';
+  const clean = String(url || '').split('?')[0].toLowerCase();
+  if (/\.(jpg|jpeg|png|gif|bmp)$/.test(clean)) return 'photo';
+  if (/\.webp$/.test(clean)) return 'photo';
+  if (/\.(mp4|mov|webm)$/.test(clean)) return 'video';
+  if (/\.(mp3|m4a|ogg|opus|wav)$/.test(clean)) return 'audio';
+  return 'document';
+}
+
+function dataUrlToUploadBlob(url) {
+  const comma = url.indexOf(',');
+  const meta = /data:([^;,]+)/.exec(url.slice(0, comma));
+  const mime = meta ? meta[1] : 'application/octet-stream';
+  if (/;base64/i.test(url.slice(0, comma))) {
+    const bin = atob(url.slice(comma + 1));
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return { blob: new Blob([bytes], { type: mime }), mime };
+  }
+  return { blob: new Blob([decodeURIComponent(url.slice(comma + 1))], { type: mime }), mime };
+}
+
+async function telegramApi(tg, method, body, isForm) {
+  const resp = await fetch(`https://api.telegram.org/bot${tg.botToken}/${method}`, {
+    method: 'POST',
+    body: isForm ? body : JSON.stringify(body),
+    ...(isForm ? {} : { headers: { 'Content-Type': 'application/json' } })
+  });
+  if (!resp.ok) {
+    throw new Error(`Telegram ${method} HTTP ` + resp.status + ' ' + (await resp.text()).slice(0, 120));
+  }
+  return resp.json().catch(() => ({}));
+}
+
+async function telegramInstantSendMedia(tg, url, kind) {
+  const method = kind === 'photo' ? 'sendPhoto' : kind === 'video' ? 'sendVideo' : kind === 'audio' ? 'sendAudio' : 'sendDocument';
+  const field = kind === 'photo' ? 'photo' : kind === 'video' ? 'video' : kind === 'audio' ? 'audio' : 'document';
+  // Thử đưa URL cho Telegram tự tải trước (nhanh, không tốn RAM).
+  try {
+    await telegramApi(tg, method, { chat_id: tg.chatId, [field]: url });
+    return;
+  } catch (err) {
+    if (url.startsWith('data:')) throw err;
+    // URL hết hạn/bị chặn → tải bytes về rồi upload (cần host_permissions của CDN).
+    const fetched = await fetch(url, { credentials: 'omit' });
+    if (!fetched.ok) throw err;
+    const form = new FormData();
+    form.append('chat_id', tg.chatId);
+    form.append(field, await fetched.blob(), 'media');
+    await telegramApi(tg, method, form, true);
+  }
+}
+
+async function telegramInstant(record, tg) {
+  const who = record.isSelf ? 'Bạn' : record.personName || record.senderName || 'Ai đó';
+  const thread = record.threadName && record.threadName !== record.personName ? ` (nhóm ${record.threadName})` : '';
+  const time = new Date(record.unsentAt || record.timestamp || Date.now()).toLocaleString('vi-VN');
+  const lines = [`🗑 <b>${escapeTelegramHtml(who)}</b> đã thu hồi 1 tin nhắn${escapeTelegramHtml(thread)}`];
+  const text = String(record.text || '').trim();
+  lines.push(text ? escapeTelegramHtml(text.slice(0, 3500)) : '<i>(không có chữ)</i>');
+  lines.push(`<i>${escapeTelegramHtml(time)}</i>`);
+  await telegramApi(tg, 'sendMessage', {
+    chat_id: tg.chatId,
+    text: lines.join('\n'),
+    parse_mode: 'HTML'
+  });
+
+  const attachments = Array.isArray(record.attachments) ? record.attachments.slice(0, 8) : [];
+  for (const url of attachments) {
+    if (typeof url !== 'string' || !url) continue;
+    if (url.startsWith('data:')) {
+      const { blob, mime } = dataUrlToUploadBlob(url);
+      const kind = instantMediaKind(url, mime);
+      const method = kind === 'photo' ? 'sendPhoto' : kind === 'video' ? 'sendVideo' : kind === 'audio' ? 'sendAudio' : 'sendDocument';
+      const field = kind === 'photo' ? 'photo' : kind === 'video' ? 'video' : kind === 'audio' ? 'audio' : 'document';
+      const ext = mime === 'image/webp' ? 'webp' : mime === 'image/png' ? 'png' : mime === 'image/jpeg' ? 'jpg' : mime === 'image/gif' ? 'gif' : 'bin';
+      const form = new FormData();
+      form.append('chat_id', tg.chatId);
+      form.append(field, blob, `photo.${ext}`);
+      await telegramApi(tg, method, form, true);
+    } else {
+      await telegramInstantSendMedia(tg, url, instantMediaKind(url, ''));
+    }
+  }
+}
+
 async function pendingArchiveCount() {
   const res = await chrome.storage.local.get(UNSENT_LIST_KEY);
   const list = Array.isArray(res[UNSENT_LIST_KEY]) ? res[UNSENT_LIST_KEY] : [];
@@ -335,6 +436,16 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     chrome.storage.local.set({ [STORAGE_KEY_LAST_CAPTURE]: Date.now() });
     (async () => {
       const settings = await getArchiveSettings();
+      const tg = settings.upload?.telegram || {};
+      // Push tức thì từng tin gỡ qua Telegram (chữ + media), không chờ gom lô ZIP.
+      // ARCHIVE_RECORD chỉ được content script gửi khi tin gỡ là mới nên không lo trùng.
+      if (settings.upload.enabled && tg.instant !== false && tg.botToken && tg.chatId) {
+        try {
+          await telegramInstant(record, tg);
+        } catch (err) {
+          await archiveLog('Telegram instant lỗi: ' + String(err?.message || err));
+        }
+      }
       if (!settings.media.cacheRemoteBytes) return;
       const items = (record.attachments || [])
         .filter((url) => typeof url === 'string' && !url.startsWith('data:'))
