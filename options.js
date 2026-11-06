@@ -134,7 +134,16 @@ async function getKv(key) {
 async function showFolderState() {
   try {
     const handle = await getKv('dirHandle');
-    dom.folderState.textContent = handle ? `Folder: ${handle.name}` : 'Chưa chọn folder.';
+    if (!handle) {
+      dom.folderState.textContent = 'Chưa chọn folder.';
+      return;
+    }
+    let perm = 'prompt';
+    try {
+      perm = await handle.queryPermission({ mode: 'readwrite' });
+    } catch (_) {}
+    dom.folderState.textContent =
+      perm === 'granted' ? `Folder: ${handle.name} (đã cấp quyền ghi)` : `Folder: ${handle.name} (chưa có quyền ghi — bấm "Chọn folder lưu…" lại)`;
   } catch (_) {
     dom.folderState.textContent = '';
   }
@@ -148,11 +157,19 @@ dom.pickFolder.addEventListener('click', async () => {
   try {
     const handle = await window.showDirectoryPicker({ mode: 'readwrite', id: 'fb-archive' });
     await putKv('dirHandle', handle);
+    // Có user gesture ở đây nên xin quyền ghi luôn, offscreen dùng lại sau này.
+    let perm = 'prompt';
+    try {
+      perm = await handle.requestPermission({ mode: 'readwrite' });
+    } catch (_) {}
     settings.export.downloadMode = 'folder';
     const modeSelect = document.querySelector('[data-path="export.downloadMode"]');
     if (modeSelect) modeSelect.value = 'folder';
     scheduleSave();
-    await showFolderState();
+    dom.folderState.textContent =
+      perm === 'granted'
+        ? `Folder: ${handle.name} (đã cấp quyền ghi)`
+        : `Folder: ${handle.name} (trình duyệt từ chối quyền ghi — thử chọn lại)`;
   } catch (err) {
     if (String(err?.name) !== 'AbortError') {
       dom.folderState.textContent = 'Lỗi chọn folder: ' + String(err?.message || err);

@@ -572,10 +572,16 @@ function zipName(batchId, index, total) {
 
 async function writeToFolder(blob, name) {
   const handle = await idbGet('kv', 'dirHandle');
-  if (!handle) throw new Error('Chưa chọn folder lưu (Options → Nơi tải)');
-  let perm = await handle.queryPermission({ mode: 'readwrite' });
-  if (perm !== 'granted') perm = await handle.requestPermission({ mode: 'readwrite' });
-  if (perm !== 'granted') throw new Error('Chưa được cấp quyền ghi folder');
+  if (!handle) throw new Error('Chưa chọn folder lưu (Options → Nơi tải → Chọn folder lưu…)');
+  // Offscreen không có user gesture nên KHÔNG gọi requestPermission ở đây
+  // (gọi cũng bị từ chối). Quyền phải được cấp lúc người dùng bấm "Chọn folder lưu…".
+  let perm = 'prompt';
+  try {
+    perm = await handle.queryPermission({ mode: 'readwrite' });
+  } catch (_) {}
+  if (perm !== 'granted') {
+    throw new Error('Folder chưa được cấp quyền ghi — mở Options → bấm "Chọn folder lưu…" lại');
+  }
   const fileHandle = await handle.getFileHandle(name, { create: true });
   const writable = await fileHandle.createWritable();
   await writable.write(blob);
